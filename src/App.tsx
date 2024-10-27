@@ -1,4 +1,3 @@
-// src/App.tsx
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
@@ -12,6 +11,7 @@ import Record from './pages/Record';
 import Insights from './pages/Insights';
 import Resources from './pages/Resources';
 import Settings from './pages/Settings';
+import HowItWorks from './pages/HowItWorks';
 
 function App() {
   return (
@@ -22,6 +22,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/how-it-works" element={<HowItWorks />} />
 
           {/* Protected routes */}
           <Route

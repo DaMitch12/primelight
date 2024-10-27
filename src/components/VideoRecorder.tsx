@@ -1,8 +1,8 @@
 // src/components/VideoRecorder.tsx
+
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Camera, Square, RefreshCw, X, Loader, Upload, BarChart2, AlertCircle, CheckCircle } from 'lucide-react';
 import { videoAnalysisService } from '../services/VideoAnalysisService';
-import { transcribeAudio } from '../services/SpeechToTextService';
 
 interface VideoRecorderProps {
   onAnalysisComplete: (results: any) => void;
@@ -28,9 +28,8 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
   // === REFS SECTION ===
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);  // New ref for stream management
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const audioContextRef = useRef<AudioContext | null>(null);
   const frameCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -47,7 +46,7 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
   const [showCameraPrompt, setShowCameraPrompt] = useState(true);
   const [showSuccessFlash, setShowSuccessFlash] = useState(false);
 
-  // === CLEANUP FUNCTION === (Add this new function)
+  // === CLEANUP FUNCTION ===
   const cleanup = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => {
@@ -56,28 +55,22 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
       streamRef.current = null;
     }
 
-    if (mediaRecorderRef.current) {
-      if (mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
       mediaRecorderRef.current = null;
-    }
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
     }
 
     chunksRef.current = [];
     setIsRecording(false);
     setRecordingDuration(0);
   }, []);
- // === EFFECTS SECTION ===
- useEffect(() => {
-  return () => {
-    cleanup();
-  };
-}, [cleanup]);
+
+  // === EFFECTS SECTION ===
+  useEffect(() => {
+    return () => {
+      cleanup();
+    };
+  }, [cleanup]);
 
   useEffect(() => {
     let intervalId: NodeJS.Timer;
@@ -91,51 +84,27 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
     };
   }, [isRecording]);
 
-  useEffect(() => {
-    let frameInterval: NodeJS.Timer;
-    
-    if (isRecording && videoRef.current) {
-      frameInterval = setInterval(async () => {
-        if (isProcessingFrame) return;
-        await processCurrentFrame();
-      }, 1000); // Process every second
-    }
-  
-    return () => {
-      if (frameInterval) clearInterval(frameInterval);
-    };
-  }, [isRecording, isProcessingFrame]);
-
-  const processCurrentFrame = async () => {
-    if (!videoRef.current || isProcessingFrame) return;
-    try {
-      setIsProcessingFrame(true);
-      
-      // Capture current frame
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      
-      ctx.drawImage(videoRef.current, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      // Process frame using our service
-      const metrics = await videoAnalysisService.processRealTimeFrame(imageData);
-      updateMetrics(metrics);
-    } catch (err) {
-      console.error('Frame processing error:', err);
-    } finally {
-      setIsProcessingFrame(false);
-    }
-  };
-  
+  // === CAMERA INITIALIZATION ===
   const initializeCamera = async () => {
     try {
-      // Clean up any existing streams first
+      // Check browser support
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Your browser does not support video recording');
+      }
+
+      // Check permissions
+      try {
+        const permissions = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        if (permissions.state === 'denied') {
+          throw new Error('Camera permission is denied');
+        }
+      } catch (err) {
+        console.warn('Permission check failed:', err);
+      }
+
+      // Clean up existing streams
       cleanup();
 
-      // Request both video and audio permissions explicitly
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
@@ -149,66 +118,37 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
         }
       });
 
-      // Add this line right here
-      console.log('Stream tracks:', stream.getTracks());
-
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        // Wait for the video to be ready
-        await new Promise((resolve) => {
-          if (videoRef.current) {
-            videoRef.current.onloadedmetadata = resolve;
-          }
-        });
-        
-        await videoRef.current.play();
+      if (!stream.getVideoTracks().length) {
+        throw new Error('No video track available');
       }
 
       streamRef.current = stream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Wait for the video to be ready
-        await new Promise((resolve) => {
+        await new Promise<void>((resolve) => {
           if (videoRef.current) {
-            videoRef.current.onloadedmetadata = resolve;
+            videoRef.current.onloadedmetadata = () => resolve();
           }
         });
         
         await videoRef.current.play();
+        setIsCameraReady(true);
+        setShowCameraPrompt(false);
+        setError('');
       }
-
-      // Initialize audio context
-      audioContextRef.current = new AudioContext();
-      
-      setIsCameraReady(true);
-      setShowCameraPrompt(false);
-      setError('');
     } catch (err) {
       console.error('Camera initialization error:', err);
-      let errorMessage = 'Unable to access camera or microphone.';
-      
-      if (err instanceof Error) {
-        if (err.name === 'NotAllowedError') {
-          errorMessage = 'Camera access denied. Please enable camera permissions and try again.';
-        } else if (err.name === 'NotFoundError') {
-          errorMessage = 'No camera or microphone found. Please check your device connections.';
-        } else if (err.name === 'NotReadableError') {
-          errorMessage = 'Camera or microphone is already in use by another application.';
-        }
-      }
-      
-      setError(errorMessage);
+      setError(getErrorMessage(err));
       setIsCameraReady(false);
       setShowCameraPrompt(true);
     }
   };
 
+  // === RECORDING FUNCTIONS ===
   const startRecording = useCallback(async () => {
-    if (!streamRef.current || !videoRef.current) {
-      setError('Camera not initialized properly');
+    if (!streamRef.current) {
+      setError('Camera not initialized');
       return;
     }
 
@@ -217,7 +157,7 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
       const options = { mimeType: 'video/webm; codecs=vp8,opus' };
       
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        throw new Error('Unsupported mime type');
+        throw new Error(`${options.mimeType} is not supported`);
       }
 
       const mediaRecorder = new MediaRecorder(streamRef.current, options);
@@ -229,25 +169,19 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
         }
       };
 
-      mediaRecorder.onstop = async () => {
+      mediaRecorder.onstop = () => {
         const videoBlob = new Blob(chunksRef.current, { type: options.mimeType });
         const url = URL.createObjectURL(videoBlob);
         setRecordingPreview(url);
         setRealTimeMetrics(null);
       };
 
-      mediaRecorder.onerror = (event) => {
-        console.error('MediaRecorder error:', event);
-        setError('Recording failed. Please try again.');
-        cleanup();
-      };
-
-      mediaRecorder.start(1000); // Capture in 1-second chunks
+      mediaRecorder.start(1000);
       setIsRecording(true);
       setRecordingDuration(0);
     } catch (err) {
       console.error('Recording start error:', err);
-      setError('Failed to start recording. Please check your browser compatibility.');
+      setError(getErrorMessage(err));
       cleanup();
     }
   }, [cleanup]);
@@ -257,17 +191,39 @@ const VideoRecorder: React.FC<VideoRecorderProps> = ({ onAnalysisComplete, onCan
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       
-      // Keep the camera stream active for potential re-recording
       if (streamRef.current) {
         const videoTracks = streamRef.current.getVideoTracks();
         videoTracks.forEach(track => {
-          track.enabled = false; // Disable but don't stop the track
+          track.enabled = false;
         });
       }
     }
     setShowSuccessFlash(true);
     setTimeout(() => setShowSuccessFlash(false), 3000);
-}, []);
+  }, []);
+
+  // === HELPER FUNCTIONS ===
+  const getErrorMessage = (err: any): string => {
+    if (err instanceof Error) {
+      switch (err.name) {
+        case 'NotAllowedError':
+          return 'Camera access denied. Please enable camera permissions.';
+        case 'NotFoundError':
+          return 'No camera found. Please check your device connections.';
+        case 'NotReadableError':
+          return 'Camera is in use by another application.';
+        default:
+          return err.message;
+      }
+    }
+    return 'An unknown error occurred';
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const handleDataAvailable = (event: BlobEvent) => {
     if (event.data.size > 0) {

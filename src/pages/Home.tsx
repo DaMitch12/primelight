@@ -15,10 +15,10 @@ const Home = () => {
             </Link>
             <div className="flex items-center space-x-8">
               <Link 
-                to="/resources" 
+                to="/how-it-works" 
                 className="text-gray-600 hover:text-[#6366F1] transition-colors"
               >
-                Resources
+                How It Works
               </Link>
               <Link 
                 to="/login" 
