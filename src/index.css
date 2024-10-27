@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #141519;
+  --nav-background: #1a1b20;
+  --text-primary: #ffffff;
+  --text-secondary: #a0a0a0;
+  --accent-blue: #55b9f3;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--background);
+  color: var(--text-primary);
+}
+
+.nav-link-hover {
+  @apply transition-colors duration-200 ease-in-out hover:text-white;
+}
